@@ -1,4 +1,0 @@
-interface:
-  display_name: "Agent Design Knowledge Retrieval"
-  short_description: "Design retrieval and knowledge systems"
-  default_prompt: "Design retrieval architecture, awareness orchestration, and lifecycle controls for agent knowledge."

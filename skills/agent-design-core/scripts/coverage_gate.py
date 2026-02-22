@@ -41,9 +41,14 @@ def parse_frontmatter(path: Path):
     return data if isinstance(data, dict) else None
 
 
+def _skill_root(suite_root: Path) -> Path:
+    return suite_root / "skills" if (suite_root / "skills").is_dir() else suite_root
+
+
 def collect_reference_ids(suite_root: Path):
+    skill_root = _skill_root(suite_root)
     ids = set()
-    for skill in suite_root.glob("agent-design-*"):
+    for skill in skill_root.glob("agent-design-*"):
         refs = skill / "references"
         if refs.exists():
             for path in refs.glob("*.md"):
@@ -84,7 +89,8 @@ def main():
 
     source_pack = Path(args.source_pack).resolve()
     suite_root = Path(args.suite_root).resolve()
-    matrix_path = suite_root / "agent-design-core" / "references" / "source-coverage-matrix.md"
+    skill_root = _skill_root(suite_root)
+    matrix_path = skill_root / "agent-design-core" / "references" / "source-coverage-matrix.md"
 
     if not source_pack.exists():
         print(f"[ERROR] source pack not found: {source_pack}")

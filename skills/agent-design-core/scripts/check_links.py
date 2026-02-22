@@ -28,7 +28,8 @@ def parse_frontmatter(path: Path):
 
 
 def iter_skill_dirs(suite_root: Path):
-    return sorted([p for p in suite_root.glob("agent-design-*") if p.is_dir()])
+    skill_root = suite_root / "skills" if (suite_root / "skills").is_dir() else suite_root
+    return sorted([p for p in skill_root.glob("agent-design-*") if p.is_dir()])
 
 
 def collect_reference_ids(skill_dirs: list[Path]):
@@ -81,7 +82,7 @@ def check_markdown_links(path: Path, errors: list[str]):
 
 def main():
     parser = argparse.ArgumentParser(description="Check related-id links and markdown file links across agent-design suite.")
-    parser.add_argument("--suite-root", required=True, help="Path containing agent-design-* skill directories")
+    parser.add_argument("--suite-root", required=True, help="Bundle root (skills/ lives here; may contain agent-design-* or skills/agent-design-*)")
     args = parser.parse_args()
 
     suite_root = Path(args.suite_root).resolve()

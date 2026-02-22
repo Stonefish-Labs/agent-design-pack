@@ -52,7 +52,8 @@ def parse_frontmatter(path: Path):
 
 
 def iter_reference_files(suite_root: Path):
-    for skill_dir in sorted(suite_root.glob("agent-design-*")):
+    skill_root = suite_root / "skills" if (suite_root / "skills").is_dir() else suite_root
+    for skill_dir in sorted(skill_root.glob("agent-design-*")):
         refs = skill_dir / "references"
         if refs.exists():
             yield from sorted(refs.glob("*.md"))

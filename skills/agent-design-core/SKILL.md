@@ -40,10 +40,10 @@ Before finalizing any recommendation:
 4. Verify coverage updates in `references/source-coverage-matrix.md` if source-derived material changed.
 
 ## Maintenance Commands
-Use helper scripts in `scripts/`:
-- `python3 scripts/lint_frontmatter.py --suite-root ../`
-- `python3 scripts/check_links.py --suite-root ../`
-- `python3 scripts/coverage_gate.py --source-pack ../design-considerations-pack --suite-root ../ --fail-on-missing`
+Use helper scripts in `scripts/` from the bundle root (parent of `skills/`). Pass the bundle root as `--suite-root`:
+- `python3 skills/agent-design-core/scripts/lint_frontmatter.py --suite-root .`
+- `python3 skills/agent-design-core/scripts/check_links.py --suite-root .`
+- `python3 skills/agent-design-core/scripts/coverage_gate.py --source-pack ./design-considerations-pack --suite-root . --fail-on-missing`
 
 ## Reference Index
 - `references/taxonomy.md`
