@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Design Architecture"
+  short_description: "Design agent system architecture choices"
+  default_prompt: "Analyze architecture options across the agent spectrum and recommend a controlled migration path."

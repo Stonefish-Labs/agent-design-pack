@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Design Core"
+  short_description: "Route and govern agent design work"
+  default_prompt: "Route this request to the right agent-design domains and enforce suite governance checks."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Design Output Reliability"
+  short_description: "Engineer reliable agent output quality"
+  default_prompt: "Compose schema, verification, and rubric controls to improve output reliability."

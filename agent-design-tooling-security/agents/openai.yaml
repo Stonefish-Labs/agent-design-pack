@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Design Tooling Security"
+  short_description: "Select secure agent tooling patterns"
+  default_prompt: "Choose tooling mechanisms and security boundaries with explicit consent and secrets policies."

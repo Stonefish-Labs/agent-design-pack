@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Design Workflow Delegation"
+  short_description: "Design delegation and workflow topology"
+  default_prompt: "Design staged agent workflows, handoff contracts, and isolation controls for resilient execution."

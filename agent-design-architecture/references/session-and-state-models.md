@@ -1,0 +1,51 @@
+---
+id: arch-session-state-models
+title: "Session and State Models"
+domain: architecture
+kind: concept
+status: active
+last_reviewed: 2026-02-22
+update_cadence: quarterly
+tags:
+  - session
+  - state
+  - memory
+related:
+  - arch-termination-recovery
+  - arch-control-surface-design
+  - know-index-enrichment-design
+---
+
+# Session and State Models
+
+## Intent
+Select the right state model for transient tasks, long-running workflows, and resumable operations.
+
+## Diagnostic Questions
+- What assumption about state scope is currently implicit and needs to be made explicit?
+- Which constraint around persistence model will break first under growth or stress?
+- What evidence will prove that resume strategy is working in production, not just in demos?
+
+## Recommended Moves
+- Define a policy for state scope before implementation choices are made.
+- Attach measurable acceptance criteria to decisions about persistence model.
+- Add a review gate that validates resume strategy at release boundaries.
+- Record rejected alternatives and why they were rejected to prevent decision drift.
+
+## Failure Modes to Avoid
+- Treating state scope as static even when runtime constraints change.
+- Optimizing for short-term speed while leaving persistence model undefined.
+- Assuming resume strategy without instrumented verification.
+
+## Expected Deliverables
+- A decision note that freezes the policy for state scope.
+- An execution checklist tied to persistence model risk controls.
+- A review artifact showing pass or fail evidence for resume strategy.
+
+## Related References
+- `arch-termination-recovery`
+- `arch-control-surface-design`
+- `know-index-enrichment-design`
+
+## Review Cadence
+Review this reference on a `quarterly` cadence or sooner when operating constraints materially change.

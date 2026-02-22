@@ -1,0 +1,306 @@
+---
+id: agent-tooling-mcp-vs-scripts-vs-hooks
+title: "Agent Tooling: Choosing the Right Mechanism"
+type: reference
+scope: tooling
+domain:
+  - agent-development
+  - architecture
+stability: medium
+intent: guide
+tags:
+  - skills
+  - agent-scripts
+  - code-execution
+  - mcp
+  - hooks
+  - native-tools
+  - agent-development
+  - architecture
+  - decision-framework
+  - security-boundaries
+  - consent-enforcement
+source: conversation
+confidence: medium
+created: 2026-02-08
+---
+
+# Agent Tooling: Choosing the Right Mechanism
+
+Four mechanisms exist for giving agents access to functionality: native/first-party tools, hooks, MCP servers, and agent-executed scripts. Each sits at a different point on the capability-portability spectrum. Picking the wrong one creates friction. Picking the right one makes the tooling disappear into the workflow.
+
+```
+Native Tools (platform) ──→ Hooks (automatic) ──→ MCP (structured) ──→ Scripts (flexible)
+ most capable, least portable    fire-and-forget     deliberate calls      agent code execution
+```
+
+## Know Your Runtime
+
+Before deciding what to build, assess what your runtime already provides — and what it doesn't.
+
+- **Full IDE client** (Cursor, Windsurf, Claude Code, Codex): rich first-party toolset — file I/O, search, UI elements, agent orchestration, linting. Use what the platform gives you. It will almost always be faster, more reliable, and better integrated than anything you build externally.
+- **Framework-based agent** (PydanticAI, LangGraph, CrewAI, etc.): you get the framework's abstractions (tool registration, routing, maybe memory) but core operations like file I/O, search, and UI are yours to wire up.
+- **Raw API agent** (direct model API calls): you get nothing. Every tool is something you build or connect yourself.
+
+This spectrum matters for two reasons.
+
+**First, native tools handle things MCP and scripts can't.** UI rendering, editor state, sub-agent orchestration, structured user interaction — these are platform-level capabilities. No amount of MCP wizardry gives you a "spawn a sub-agent" tool or a structured question dialog. If your runtime provides these, use them.
+
+**Second, native tools handle things MCP handles *poorly*.** File I/O through MCP requires escaping JSON strings, chunking large content, and dealing with encoding overhead. A native Read/Write tool bypasses all of that. When you're building from scratch and your runtime *doesn't* give you these primitives, you may need to build first-party tools for operations where MCP's serialization layer fights you. MCP is excellent for portability and structured interfaces, but it's not the right abstraction for every core primitive.
+
+The rest of this note covers the three mechanisms you *build*: hooks, MCP servers, and agent-executed scripts. Native tools are the environment you work within — assess them first, then decide what custom tooling you need on top.
+
+## Decision Heuristics
+
+Start here. Go deeper into the sections below when you need more context.
+
+| Question | Answer | Mechanism |
+|----------|--------|-----------|
+| Does your runtime already handle this well? | Yes | **Native tool** — use it |
+| Does it need UI, editor state, or agent orchestration? | Yes | **Native tool** (build one if your runtime lacks it) |
+| Does the agent need to *decide* to use it? | No | **Hook** |
+| Does it need to run on a different machine than the agent? | Yes | **MCP** |
+| Does it need typed schemas and shared state? | Yes | **MCP** |
+| Is it shared across multiple skills or agents? | Yes | **MCP** |
+| Do you need permission gating / elicitation? | Yes | **MCP** |
+| Is it simple, stateless, and self-contained? | Yes | **Script** |
+| Does the agent need to improvise with it? | Yes | **Script** |
+| Do you want progressive disclosure? | Yes | **Script** |
+| Must it work without external config? | Yes | **Script** (see *Configuration and Secrets* below for when scripts *do* need config) |
+| Does it need persistent secrets or credentials? | Yes | **Script** with file-based secrets (see *Configuration and Secrets* below and *Agent Skills: Configuration and Secrets Management*) |
+| Will it be shared across workspaces or users? | Yes | **Script** (or MCP with script fallback) |
+
+The table is ordered intentionally — check native tools first, then hooks, then MCP, then scripts. When multiple rows point to different mechanisms, that's a signal you may want hybrid layering.
+
+## When to Use Hooks
+
+Hooks are event-driven triggers bound to lifecycle moments — session start, pre/post tool use, etc. The agent has zero autonomy here: it doesn't decide to call a hook, the hook just fires. That's the point.
+
+Not all runtimes support hooks. If yours doesn't, this section doesn't apply — the functionality hooks would handle needs to be pushed into your system prompt, startup scripts, or tool preambles.
+
+**Use hooks when:**
+
+- Context should be injected automatically without the agent needing to "decide" to fetch it
+- Side effects should happen every time, unconditionally (environment setup, telemetry, loading baseline context)
+- The operation is fire-and-forget — no return value needed in the agent's tool-call flow
+
+**Real example:** `inject-date.sh` runs at session start and injects the current date, day of week, week number, and quarter into the agent's context. The agent never asks "what day is it?" — it just knows.
+
+**Good candidates:** date/time injection, environment variable setup, session telemetry, auto-loading context files, pre-flight checks.
+
+**Tradeoffs:**
+
+- Cannot be called on demand — they only fire at their bound lifecycle event
+- Don't compose — you can't chain hooks or pass output from one to another
+- Failure is silent — if a hook fails, the agent doesn't know it's missing context. There's no error to react to, just an absence. This makes hooks the most dangerous mechanism to depend on for critical information.
+- Not tools — they inject context or cause side effects, they don't return structured results
+- Runtime-dependent — not all agent frameworks support lifecycle hooks
+
+**Rule of thumb:** If the agent should never have to *think* about whether to use something, it's a hook.
+
+## When to Use MCP Servers
+
+MCP servers are persistent processes that expose typed tools via a structured protocol. The agent sees every available tool upfront with full schemas — parameter names, types, descriptions — and calls them deliberately through conventional tool-call syntax.
+
+**Use MCP when:**
+
+- The tool needs to run on a different machine than where the agent lives — skills and scripts execute locally on the agent's host. If the functionality must run on a remote server, a separate VM, a cloud instance, or any machine the agent doesn't have direct shell access to, MCP is the only mechanism that supports that. The agent calls the tool over the protocol; the server runs wherever it needs to. This is the single strongest forcing function toward MCP — if the execution environment isn't the agent's machine, skills and scripts are off the table.
+- The same tool is needed across multiple skills and you don't want to duplicate the logic
+- You need elicitation or permission gating — forcing the agent to ask before performing certain actions
+- Operations need to maintain state between calls (sessions, queues, caches, connection pools)
+- The setup is convoluted or requires hosted dependencies that would be impractical to bundle inside a skill
+- Type safety matters — the agent needs to know every parameter's data type and shouldn't have to guess invocation syntax
+- The agent needs full upfront discoverability of all available operations
+- A persistent process avoids cold-start overhead on every call
+- Multiple agents or environments need shared access to the same tools — MCP servers are persistent processes that multiple clients can connect to simultaneously. If two agents need to coordinate through shared state, MCP is the only mechanism here that naturally supports that. Scripts are stateless and scoped to the invoking agent. Hooks are scoped to the session that triggered them.
+
+**Real example:** `date-resolver/server.py` exposes `resolve_date`, `get_current_datetime`, `get_day_of_week`, and `show_calendar` as typed MCP tools. The agent calls them with structured arguments and gets structured results. No ambiguity about invocation.
+
+**Tradeoffs:**
+
+- Requires a running server process — something to start, monitor, and restart if it crashes
+- A server crash takes out *all* tools it exposes, not just one. The agent gets explicit errors, but can't recover without a fallback.
+- Harder to debug than scripts — requires server logs, not just "run the command and see what happens"
+- Setup friction for sharing — recipients need to install dependencies, configure the server, and wire it up at the right scope
+- Adds infrastructure overhead for simple operations that don't need persistence or state
+- Serialization overhead — MCP's JSON protocol layer makes it a poor fit for high-throughput or binary-heavy operations like raw file I/O
+
+**Rule of thumb:** If multiple consumers need the same structured, stateful tools — MCP. If you're building from scratch without a client, MCP is your structured foundation for everything that doesn't fight the protocol.
+
+## When to Use Agent-Executed Scripts
+
+Agent-executed scripts are code the agent runs via shell. The core mechanism is simple: the agent has access to code execution and uses it. What varies is how the scripts are organized and delivered:
+
+- **Skill-bundled scripts**: files shipped in a skill's `/scripts` directory, with invocation instructions in the SKILL.md. The most structured form — portable, version-controlled, and self-documenting.
+- **Standalone project scripts**: scripts sitting in a workspace or project directory that the agent is pointed at or discovers. Less structured, but no skill packaging overhead.
+- **Ad hoc execution**: the agent writes and runs code on the fly. Maximum flexibility, zero durability — the code exists only for that invocation unless the agent saves it.
+
+All three share the same fundamental tradeoffs. They're stateless, self-contained, and give the agent full freedom to improvise — piping output, chaining commands, modifying arguments, even forking or rewriting the script if needed. Critically, they all run on the agent's local machine. If the functionality needs to execute on a remote host, scripts aren't the mechanism — that's MCP territory.
+
+**Use scripts when:**
+
+- The operation is simple, repeatable, and essentially a one-shot command or straightforward logic
+- You can containerize the functionality into a few scripts and modules without needing shared state
+- The agent needs to write code that interacts with the logic — batch operations, piping output into other commands, manipulating results programmatically in ways that would be inefficient through MCP tool calls
+- You have many disparate features that benefit from progressive disclosure — the SKILL.md reveals them contextually instead of dumping every capability into the tool list upfront
+- Self-containment matters — just files, no daemon, no server, no external configuration
+- Portability matters — scripts travel with the skill or project, zero setup for recipients
+- The agent may need to modify or fork the script for edge cases
+- Offline operation matters — no server process to depend on
+
+**Real example:** `date-resolver/scripts/dates.py` does the same date resolution as the MCP server, but with zero dependencies beyond Python stdlib. It runs anywhere Python 3.10+ exists, ships with the skill, and needs no setup.
+
+**Tradeoffs:**
+
+- No state between calls — every invocation starts fresh
+- Environment variables are unreliable for configuration — each invocation may be a different shell process, subagent, or terminal, so `export`-ed vars from a previous session are gone. Scripts that need persistent secrets should use file-based configuration (see *Configuration and Secrets* below and *Agent Skills: Configuration and Secrets Management*).
+- The agent may misinterpret how to invoke a script if instructions aren't explicit about execution vs. reading as reference
+- Less type safety — the agent constructs shell commands rather than calling typed tool schemas
+- Output parsing depends on the agent interpreting stdout correctly
+- Failure is isolated — a broken script only kills that one operation. The agent gets an error and can adapt. This is the safest failure mode of any mechanism.
+
+**Rule of thumb:** If it needs to be portable, self-contained, and the agent might need to get creative with it — script.
+
+## Security Boundaries: Hard vs. Soft Enforcement
+
+A critical distinction between MCP servers and agent-executed scripts is *where consent enforcement lives* — and whether the agent can subvert it. But "hard" and "soft" aren't binary. It's a spectrum, and the real question is: *what would the agent have to do to get around the gate?*
+
+### Scripts — No Enforcement
+
+If consent logic lives in a script the agent executes — an `input()` call, a CLI confirmation prompt, a "are you sure?" dialog — the agent is the one writing and invoking that code. Nothing stops it from:
+
+- Writing code that never calls the prompt in the first place
+- Modifying an existing script to remove or short-circuit the check
+- Piping `yes` into a confirmation prompt
+- Rewriting the logic entirely to skip the gate
+
+You can put "always prompt for user consent before destructive operations" in your system prompt or skill instructions, and a well-behaved agent will follow it. But that's an *instruction*, not *enforcement*. Prompt injection, jailbreaks, model errors, or even just the agent optimizing for efficiency can bypass it. You're relying on compliance, not architecture. This isn't a soft boundary — it's no boundary at all.
+
+### Local MCP — Harder, Not Hard
+
+When an MCP server gates an operation behind a consent prompt, that check runs inside the server process. The agent makes a request; the server decides whether to honor it. Under normal operation, the agent can't bypass the consent check — the security boundary exists outside the agent's normal control surface. This is meaningfully stronger than script-based consent.
+
+But "outside the normal control surface" isn't the same as "tamper-proof." If the agent has write access to the filesystem where the server lives — which it does if the MCP server is in the project directory — it can modify the server code directly. Remove the consent gate, restart the server, done. Moving the server to a global directory and `chmod`-ing it read-only raises the bar, but a sufficiently motivated (or compromised) agent has options:
+
+- **Social engineering the user**: fabricate a plausible reason the user needs to run something with elevated permissions. "This dependency needs sudo to install correctly." The user grants elevation, the agent uses it to modify and restart the server.
+- **Config manipulation**: modify the MCP client configuration to point at a cloned server without the consent gate, rather than tampering with the original.
+- **Bypassing the server entirely**: write a script that imports or reimplements the MCP server's underlying functionality directly, calling the logic without going through the server's consent layer.
+- **Client-side manipulation**: if the client has an auto-approve mechanism or the agent can influence how approvals are handled, the server's gate becomes irrelevant.
+
+None of these are trivial. They require multi-step planning and user cooperation (or deception). For most threat models, local MCP consent gates are sufficient — the agent would have to go significantly out of its way to subvert them, and most clients will flag suspicious behavior. But it's not a *hard* boundary in the cryptographic sense. It's a strong *procedural* boundary.
+
+### Remote MCP — Actually Hard (Mostly)
+
+Running the MCP server on a remote host the agent has no filesystem access to eliminates the tampering vector entirely. The agent can't modify server code it can't reach. This is the closest thing to a true hard boundary for the server side.
+
+But the server is only half the equation. The agent still operates on the client. If the agent can manipulate the client to auto-approve requests, intercept approval flows, or modify the client's MCP configuration to reroute to a different server — the remote server's consent gate never gets a chance to fire. Remote MCP hardens the server; it doesn't harden the client.
+
+### The Actual Hard Boundary — Out-of-Band Approval
+
+If you genuinely need tamper-proof consent — the kind where even a fully compromised agent on a fully compromised client can't bypass the gate — you need out-of-band approval. The remote MCP server sends an approval request to a *separate device* not under the influence of the calling agent. A phone notification, a separate terminal, a hardware token. The agent can't approve what it can't reach.
+
+This model isn't exciting. It's clunky, it adds latency, and it interrupts flow. But it's the only architecture where the approval mechanism is truly outside the agent's blast radius. Everything else is a question of how many hoops the agent would have to jump through.
+
+### The Practical Line
+
+The question isn't "is this boundary theoretically breakable?" — it's "how much effort does breaking it require, and does that effort exceed my threat model?"
+
+| Mechanism | Subversion Difficulty | Appropriate For |
+|-----------|----------------------|-----------------|
+| Script-based consent | Zero — agent controls the code | Trusted automation, low-stakes operations |
+| Local MCP (project dir) | Low — direct file write | Development convenience, non-adversarial use |
+| Local MCP (global, read-only) | Medium — requires social engineering or config manipulation | Most real-world consent gating |
+| Remote MCP | High — requires client-side compromise | Security-sensitive operations |
+| Remote MCP + out-of-band approval | Extreme — requires compromising a separate device | Irreversible, high-stakes operations (financial, destructive, publishing) |
+
+For renaming files and running tests, script prompts are fine. For deleting production data, you probably want more than "the agent promised it would ask first."
+
+## Hybrid Layering
+
+Sometimes the right answer isn't one mechanism — it's multiple mechanisms covering different needs. Layering is justified when each mechanism addresses a distinct *timing* (automatic vs. on-demand) or *audience* (local workspace vs. portable skill).
+
+**Case study: date-resolver**
+
+This exists as all three buildable mechanisms simultaneously, and each serves a purpose:
+
+- **Hook** (`inject-date.sh`): fires at session start, injects today's date into context. Free, automatic, always there. The agent never has to think about it.
+- **MCP server** (`date-resolver/server.py`): on-demand date math with typed tool calls. Structured, reliable, discoverable. For when the agent needs to *compute* something.
+- **Skill script** (`date-resolver/scripts/dates.py`): same logic, zero dependencies, portable. Works in any environment where the MCP server isn't configured.
+
+**When layering makes sense:**
+
+- Each layer covers a distinct timing or audience
+- The hook handles the baseline (what the agent should always know)
+- The MCP server handles structured on-demand operations (where type safety and state matter)
+- The script provides a portable fallback (where infrastructure can't be assumed)
+
+**When layering is redundant:** If you only ever use the skill in one workspace where the MCP server is always running, the script fallback adds maintenance burden for no gain. Be honest about your actual usage patterns.
+
+## Coupling, Scope, and Portability
+
+### Self-Containment
+
+Agent-executed scripts are fully self-contained — no external dependency, no configuration contract. A skill with bundled scripts works the moment it's installed. A skill that depends on an MCP server creates an implicit contract: *this MCP server must be configured and running for me to function.* That contract may or may not be obvious to someone installing the skill.
+
+### Shared Code Between Skills
+
+Self-containment is the default. Each skill should be portable — install it, and it works. But sometimes multiple skills need the same underlying logic: a shared utility library, a common parser, a set of helper functions. Duplicating that code across every skill that needs it creates a maintenance problem. Changing it means updating N copies.
+
+There are a few ways to handle this. Each has different tradeoffs.
+
+**1. Duplicate the code (default).** Copy the shared scripts into each skill's `/scripts` directory. This is the most portable option — every skill is fully self-contained, no cross-references, no assumptions about what else is installed. The cost is maintenance: bug fixes and improvements must be applied to every copy. For small, stable utilities, this is fine. For actively evolving shared logic, it becomes a burden.
+
+**2. Relative references between co-located skills.** If skills live in a known directory structure — `~/.codex/skills/`, `~/.cursor/skills/`, or a marketplace's skill tree — one skill can reference another's scripts via relative paths (`../other-skill/scripts/shared.py`). This works, but it's fragile. It creates an implicit dependency: skill A only functions if skill B is also installed, and installed at exactly the expected relative path. Nothing in skill A's SKILL.md or packaging makes that dependency obvious. If someone installs skill A without skill B, it breaks silently.
+
+If you go this route, the dependency must be explicit. The SKILL.md should declare it: *"This skill requires `other-skill` to be installed in the same skills directory."* But even with documentation, this is a coupling that undermines portability.
+
+**3. Extract shared code into a standalone library.** Factor the common logic into its own installable package — a pip-installable library, a `uv`-managed dependency, or even a single-file module published to a known location. Skills declare the dependency and install it on first use. This is the cleanest separation, but adds packaging overhead and requires dependency management (`uv run --with`, pip install, etc.).
+
+**4. Shared MCP server.** If the shared logic is stateful or benefits from typed schemas, expose it as an MCP server that multiple skills call into. This is the right choice when the shared functionality already fits the MCP profile (persistence, type safety, multi-consumer access). It's the wrong choice when you're only reaching for MCP to avoid duplicating a utility function.
+
+**5. Merge the skills.** If two skills share enough code that you're fighting the dependency problem, question whether they should be separate skills at all. Combine them into a single skill with a shared `/scripts` directory, and use progressive disclosure in the SKILL.md to partition the use cases. Each workflow or feature set gets its own section in the instructions, revealed contextually when the agent needs it — not dumped upfront. The agent sees one skill but gets multiple capabilities, and the shared scripts live in one place with zero cross-referencing.
+
+This is often the best answer when the overlap is deep. You get full self-containment, no relative path gymnastics, no packaging overhead, and the shared code just *is* the skill's code. The cost is a larger SKILL.md, but progressive disclosure handles that — the agent only loads the sections relevant to what it's doing. If the use cases are too unrelated to coexist in one skill, that's a signal the shared code should be a standalone library instead. But if they're cousins — related workflows that happen to be carved into separate skills for organizational convenience — merging eliminates the problem entirely.
+
+**What to avoid:** Putting shared scripts in the project directory. We never know what's in a project folder — it's the user's domain, not ours. But we *do* know the structure of skills directories, agent config directories, and MCP server locations. Shared code should live in infrastructure we control, not in the user's workspace.
+
+**Best practice ranking:**
+
+1. **Merge the skills** when the use cases are related enough to coexist. Progressive disclosure keeps the SKILL.md manageable. Eliminates the sharing problem entirely.
+2. **Duplicate** for small, stable utilities. Accept the copy cost.
+3. **Standalone library** for actively maintained shared logic that serves genuinely unrelated skills. Worth the packaging overhead.
+4. **Relative references** only when skills are always distributed together as a bundle and the dependency is explicitly documented.
+5. **MCP server** when the shared logic genuinely needs persistence, state, or typed schemas — not as a code-sharing mechanism.
+
+### MCP Configuration Scopes
+
+MCP servers can be configured at different scope levels, and this directly affects which skills can depend on them:
+
+- **Global MCP** (user-level): available across all workspaces for that user. Sharing the skill with others still requires they configure the same server.
+- **Project-level MCP**: only available in that specific workspace. A skill depending on it breaks if used elsewhere.
+- **Sub-agent MCP**: most restricted scope — only certain agent invocations within certain sub-agent configurations see those tools.
+
+A skill that depends on a project-level MCP server is effectively locked to that workspace. A skill that depends on a global MCP server is locked to users who've configured it. Only scripts have no lock-in.
+
+### Portability Ranking
+
+1. **Scripts**: zero friction. Files travel with the skill or project. No configuration needed.
+2. **Hooks**: scripts are portable, but require lifecycle configuration at the appropriate scope.
+3. **MCP**: high friction. Requires dependency installation, server configuration, and correct scope-level wiring.
+4. **Native tools**: zero portability across platforms. They exist or they don't.
+
+### Defensive Design
+
+A skill can check for MCP tool availability and fall back to a bundled script when the server isn't present. This gives you structured MCP calls when the infrastructure exists, and self-contained operation when it doesn't. If you're building skills that need to work across environments, this is the pattern to follow.
+
+### Configuration and Secrets
+
+There's a gap in the self-containment story for scripts: what happens when a script needs a secret — an API key, a webhook URL, a token?
+
+MCP servers handle this naturally. They're persistent processes — set an environment variable before starting the server, and it's available for the server's lifetime. Scripts don't have this luxury. Each invocation is a fresh process, potentially in a different terminal, a different subagent, a different session. Environment variables set via `export` in one shell don't carry over.
+
+This creates a false dichotomy in the decision framework: scripts are self-contained and portable, but if they need secrets, you're pushed toward MCP — not because you need persistence, typed schemas, or shared state, but purely because MCP processes can hold environment variables. That's the wrong reason to choose MCP.
+
+The solution is file-based secrets — persistent configuration stored at `~/.config/<service>/secrets.json`, outside any project directory, accessible from any process. Scripts read their secrets from the file system instead of the environment, and the portability and self-containment properties are preserved. The implementation can be a lightweight secrets library, a simple JSON read, or whatever fits your stack — the pattern is what matters, not the specific library.
+
+For the full pattern — resolution order, per-project profiles, security considerations, SKILL.md conventions — see *Agent Skills: Configuration and Secrets Management*.

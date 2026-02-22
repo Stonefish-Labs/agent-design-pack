@@ -1,0 +1,19 @@
+{
+  "name": "agent-design-pack",
+  "description": "Multi-skill suite for agent design: architecture, tooling & security, knowledge retrieval, workflow delegation, and output reliability. Use for cross-domain strategy, governance, and living reference patterns.",
+  "version": "1.0.0",
+  "author": { "name": "Stonefish-Labs" },
+  "license": "MIT",
+  "repository": "https://github.com/Stonefish-Labs/agent-design-pack",
+  "keywords": [
+    "agent-design",
+    "architecture",
+    "tooling",
+    "security",
+    "retrieval",
+    "delegation",
+    "output-reliability",
+    "governance",
+    "skills"
+  ]
+}
